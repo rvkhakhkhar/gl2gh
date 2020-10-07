@@ -11,6 +11,7 @@ const config = require('config');
 
 const GitlabProject = require('../../src/gitlab/model/project.js');
 const GithubRepository = require('../../src/github/model/repository.js');
+const WebhookConfig = require('../../src/github/model/webhookConfig.js');
 const Migrate = require('../../src/migrate.js');
 const gitlabGroupDetails = require('../resources/gitlab/groupDetails.json');
 const gitlabSubgroupsList = require('../resources/gitlab/subgroupsList.json');
@@ -19,6 +20,7 @@ const gitlabSubgroup2Details = require('../resources/gitlab/subgroup2Details.jso
 const gitlabArchiveResponse = require('../resources/gitlab/archiveResponse.json');
 const githubRepoDetails = require('../resources/github/repoDetails.json');
 const githubUpdateBranchProtectionResponse = require('../resources/github/updateBranchProtectionResponse.json');
+const createWebhookResponse = require('../resources/github/createWebhookResponse.json');
 
 describe('migrate', function() {
 	const migrate = new Migrate();
@@ -34,12 +36,14 @@ describe('migrate', function() {
 	let gitCreateRemoteStub;
 	let gitPushToRemoteStub;
 	let gitListBranchesStub;
+	let gitListTagsStub;
 	let gitCheckoutStub;
 	let rmdirStub;
 	beforeEach(() => {
 		gitCloneStub = sinon.stub(git, 'clone');
 		gitCreateRemoteStub = sinon.stub(git, 'addRemote');
 		gitListBranchesStub = sinon.stub(git, 'listBranches');
+		gitListTagsStub = sinon.stub(git, 'listTags');
 		gitCheckoutStub = sinon.stub(git, 'checkout');
 		gitPushToRemoteStub = sinon.stub(git, 'push');
 		rmdirStub = sinon.stub(fs, 'rmdirSync');
@@ -79,6 +83,7 @@ describe('migrate', function() {
 			gitCreateRemoteStub.returns(Promise.resolve());
 			gitListBranchesStub.returns(Promise.resolve(['master', 'extra-branch']));
 			gitCheckoutStub.returns(Promise.resolve());
+			gitListTagsStub.returns(Promise.resolve([]));
 			gitPushToRemoteStub.returns(Promise.resolve());
 			//when
 			const result = await migrate.migrateToGithub(gitlabGroupName, githubOrgName);
@@ -106,6 +111,7 @@ describe('migrate', function() {
 			gitCreateRemoteStub.returns(Promise.resolve());
 			gitListBranchesStub.returns(Promise.resolve(['master', 'extra-branch']));
 			gitCheckoutStub.returns(Promise.resolve());
+			gitListTagsStub.returns(Promise.resolve([]));
 			gitPushToRemoteStub.returns(Promise.resolve());
 			//when
 			const result = await migrate.migrateToGithub(gitlabGroupName);
@@ -196,6 +202,7 @@ describe('migrate', function() {
 			gitCreateRemoteStub.returns(Promise.resolve());
 			gitListBranchesStub.returns(Promise.resolve(['master']));
 			gitCheckoutStub.returns(Promise.resolve());
+			gitListTagsStub.returns(Promise.resolve([]));
 			gitPushToRemoteStub.returns(Promise.resolve());
 
 			//when
@@ -225,6 +232,7 @@ describe('migrate', function() {
 			gitCreateRemoteStub.returns(Promise.resolve());
 			gitListBranchesStub.returns(Promise.resolve(['master', 'extra-branch']));
 			gitCheckoutStub.returns(Promise.resolve());
+			gitListTagsStub.returns(Promise.resolve([]));
 			gitPushToRemoteStub.returns(Promise.resolve());
 
 			//when
@@ -237,6 +245,37 @@ describe('migrate', function() {
 			sinon.assert.callCount(gitListBranchesStub, 8);
 			sinon.assert.callCount(gitCheckoutStub, 16);
 			sinon.assert.callCount(gitPushToRemoteStub, 16);
+			sinon.assert.callCount(rmdirStub, 8);
+			sinon.assert.calledWith(rmdirStub, sinon.match.string, sinon.match({recursive: true}));
+		});
+		it('should copy all tags of all repos from gitlab to github under specified github org', async () => {
+			//given
+			const gitlabGroupName = 'FOO';
+			const githubOrgName = 'BAR';
+			gitlabApi.get('/api/v4/groups/' + gitlabGroupName).times(2).reply(200, gitlabGroupDetails);
+			gitlabApi.get('/api/v4/groups/'+gitlabGroupName+'/subgroups').reply(200, gitlabSubgroupsList);
+			gitlabApi.get('/api/v4/groups/'+gitlabGroupName+encodeURIComponent('/')+'subgroup1').reply(200, gitlabSubgroup1Details);
+			gitlabApi.get('/api/v4/groups/'+gitlabGroupName+encodeURIComponent('/')+'subgroup2').reply(200, gitlabSubgroup2Details);
+			githubApi.post(`/orgs/${githubOrgName}/repos`).times(8).reply(201, githubRepoDetails);
+			githubApi.patch(RegExp('/repos\\/' + githubOrgName + '\\/[^\\/]+$')).times(8).reply(200, githubRepoDetails);
+			gitCloneStub.returns(Promise.resolve());
+			gitCreateRemoteStub.returns(Promise.resolve());
+			gitListBranchesStub.returns(Promise.resolve(['master', 'extra-branch']));
+			gitListTagsStub.returns(Promise.resolve(['foo-tag', 'bar-tag']));
+			gitCheckoutStub.returns(Promise.resolve());
+			gitPushToRemoteStub.returns(Promise.resolve());
+
+			//when
+			const result = await migrate.copyContentFromGitlabToGithub(gitlabGroupName, githubOrgName);
+
+			//then
+			expect(result).to.equal(0);
+			sinon.assert.callCount(gitCloneStub, 8);
+			sinon.assert.callCount(gitCreateRemoteStub, 8);
+			sinon.assert.callCount(gitListBranchesStub, 8);
+			sinon.assert.callCount(gitCheckoutStub, 16);
+			sinon.assert.callCount(gitListTagsStub, 8);
+			sinon.assert.callCount(gitPushToRemoteStub, 32);
 			sinon.assert.callCount(rmdirStub, 8);
 			sinon.assert.calledWith(rmdirStub, sinon.match.string, sinon.match({recursive: true}));
 		});
@@ -254,6 +293,7 @@ describe('migrate', function() {
 			gitCreateRemoteStub.returns(Promise.resolve());
 			gitListBranchesStub.returns(Promise.resolve(['master']));
 			gitCheckoutStub.returns(Promise.resolve());
+			gitListTagsStub.returns(Promise.resolve([]));
 			gitPushToRemoteStub.returns(Promise.resolve());
 
 			//when
@@ -284,6 +324,7 @@ describe('migrate', function() {
 			gitCreateRemoteStub.returns(Promise.resolve());
 			gitListBranchesStub.returns(Promise.resolve(['master']));
 			gitCheckoutStub.returns(Promise.resolve());
+			gitListTagsStub.returns(Promise.resolve([]));
 			gitPushToRemoteStub.returns(Promise.resolve());
 
 			//when
@@ -555,5 +596,134 @@ describe('migrate', function() {
 			repositoryList[1].should.have.property('default_branch');
 			repositoryList[1]['default_branch'].should.equal(defaultBranchName);
 		});
+	});
+
+	describe('create github webhooks', function () {
+
+		it('should create webhook for a single repo', async() => {
+			//given
+			const repoName = 'some-repo';
+			const secret = 'webhook-secret';
+			const payloadUrl = 'https://github-webhook-proxy/webhook?targetUrl=https://jenkins.some-jenkins.com/github-webhook/';
+			const events = [
+				'push',
+				'pull_request'
+			];
+			const orgName = 'some-org';
+			const webhookConfig = new WebhookConfig(repoName, secret, events, payloadUrl);
+
+			githubApi.post(
+				`/repos/${orgName}/${repoName}/hooks`,
+				_getWebhooksPayloadFor(events, payloadUrl, secret)
+			).reply(201, createWebhookResponse);
+	
+			//when
+			const res = await migrate.createWebhook([webhookConfig], orgName);
+	
+			//then
+			expect(res[0].status).to.equal(201);
+		});
+
+		it('should create webhook for multiple repos', async() => {
+			//given
+			const repoName1 = 'some-repo-1';
+			const repoName2 = 'some-repo-2';
+			const secret1 = 'webhook-secret-1';
+			const secret2 = 'webhook-secret-2';
+			const payloadUrl = 'https://github-webhook-proxy/webhook?targetUrl=https://jenkins.some-jenkins.com/github-webhook/';
+			const events = [
+				'push',
+				'pull_request'
+			];
+			const orgName = 'some-org';
+			const webhookConfig1 = new WebhookConfig(repoName1, secret1, events, payloadUrl);
+			const webhookConfig2 = new WebhookConfig(repoName2, secret2, events, payloadUrl);
+
+			githubApi.post(
+				`/repos/${orgName}/${repoName1}/hooks`,
+				_getWebhooksPayloadFor(events, payloadUrl, secret1)
+			).reply(201, createWebhookResponse);
+	
+			githubApi.post(
+				`/repos/${orgName}/${repoName2}/hooks`,
+				_getWebhooksPayloadFor(events, payloadUrl, secret2)
+			).reply(201, createWebhookResponse);
+
+			//when
+			const res = await migrate.createWebhook([webhookConfig1, webhookConfig2], orgName);
+	
+			//then
+			expect(res[0].status).to.equal(201);
+			expect(res[1].status).to.equal(201);
+		});
+
+		it('should create webhook for other repo(s) when error received for anyone', async() => {
+			//given
+			const repoName1 = 'some-repo-1';
+			const repoName2 = 'some-repo-2';
+			const secret1 = 'webhook-secret-1';
+			const secret2 = 'webhook-secret-2';
+			const payloadUrl = 'https://github-webhook-proxy/webhook?targetUrl=https://jenkins.some-jenkins.com/github-webhook/';
+			const events = [
+				'push',
+				'pull_request'
+			];
+			const orgName = 'some-org';
+			const webhookConfig1 = new WebhookConfig(repoName1, secret1, events, payloadUrl);
+			const webhookConfig2 = new WebhookConfig(repoName2, secret2, events, payloadUrl);
+
+			githubApi.post(
+				`/repos/${orgName}/${repoName1}/hooks`,
+				_getWebhooksPayloadFor(events, payloadUrl, secret1)
+			).reply(201, createWebhookResponse);
+	
+			githubApi.post(
+				`/repos/${orgName}/${repoName2}/hooks`,
+				_getWebhooksPayloadFor(events, payloadUrl, secret2)
+			).reply(401);
+
+			//when
+			const res = await migrate.createWebhook([webhookConfig1, webhookConfig2], orgName);
+	
+			//then
+			expect(res[0].status).to.equal(201);
+			assert.isNotOk(res[1]);
+		});
+	
+		it('should throw error while creating webhook', async() => {
+			//given
+			const repoName = 'second-repo';
+			const secret = 'webhook-secret-2';
+			const payloadUrl = 'https://github-webhook-proxy/webhook?targetUrl=https://jenkins.some-jenkins.com/github-webhook/';
+			const events = [
+				'push',
+				'pull_request'
+			];
+			const orgName = 'some-org';
+			const webhookConfig = new WebhookConfig(repoName, secret, events, payloadUrl);
+
+			githubApi.post(
+				`/repos/${orgName}/${repoName}/hooks`,
+				_getWebhooksPayloadFor(events, payloadUrl, secret))
+				.reply(500, createWebhookResponse);
+	
+			//when
+			const res = await migrate.createWebhook([webhookConfig], orgName);
+
+			//then
+			assert.isNotOk(res[0]);
+		});
+
+		let _getWebhooksPayloadFor = function (events, payloadUrl, secret) {
+			return {
+				'events': events,
+				'config': {
+					'url': payloadUrl,
+					'content_type': 'json',
+					'insecure_ssl': '0',
+					'secret': secret
+				}
+			};
+		};
 	});
 });
